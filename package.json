@@ -1,0 +1,16 @@
+{
+  "name": "vibemart-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Intentionally-vulnerable demo store for Opviva security demos. Not for production.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
