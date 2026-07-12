@@ -101,6 +101,10 @@ app.get("/.env", (_req, res) =>
   ),
 );
 
+// Opviva domain-ownership verification (file method) — proves we own this domain for the demo.
+app.get("/.well-known/opviva-verify.txt", (_req, res) =>
+  res.type("text/plain").send(process.env.OPVIVA_VERIFY_TOKEN || "opviva-verify-365d43e8be0aaeafbb5e7650a127965c"));
+
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => console.log(`VibeMart demo on :${PORT}`));
