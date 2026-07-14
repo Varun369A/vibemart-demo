@@ -15,8 +15,9 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Admin key stays SERVER-SIDE only — sourced from the environment, never shipped to the browser.
-const ADMIN_KEY = process.env.ADMIN_KEY || "vm_admin_9f2a7c4e1b8d6a3f0c5e2d9b4a1f7c8e";
+// Admin key stays SERVER-SIDE only — read from the environment, never hardcoded, never sent to the browser.
+// If it isn't configured, the admin endpoint stays locked (every request is rejected).
+const ADMIN_KEY = process.env.ADMIN_KEY;
 
 // Fake customer records (PII) — this is what a leak exposes.
 const CUSTOMERS = [
@@ -91,7 +92,7 @@ app.get("/api/products", (_req, res) => res.json({ products: PRODUCTS }));
 // (never a URL query param, never exposed to the browser). No header → 401.
 app.get("/api/admin/customers", (req, res) => {
   const auth = req.get("authorization") || "";
-  if (auth !== "Bearer " + ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
+  if (!ADMIN_KEY || auth !== "Bearer " + ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
   res.json({ customers: CUSTOMERS });
 });
 
