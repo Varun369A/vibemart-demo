@@ -89,17 +89,9 @@ app.get("/api/admin/customers", (req, res) => {
   res.json({ customers: CUSTOMERS });
 });
 
-// ⚠️ VULN 4: environment file served publicly.
-app.get("/.env", (_req, res) =>
-  res.type("text/plain").send(
-    [
-      "DATABASE_URL=postgres://vibemart:demo-db-pass@db.vibemart.internal:5432/store",
-      "STRIPE_SECRET_KEY=sk_live_DEMO-fake-not-a-real-stripe-key",
-      "ADMIN_API_KEY=" + ADMIN_KEY,
-      "JWT_SECRET=demo-jwt-secret-change-me",
-    ].join("\n"),
-  ),
-);
+// The /.env route was removed: environment configuration containing secrets
+// (DB credentials, Stripe key, admin API key, JWT secret) must never be served
+// over HTTP. Requests to /.env now fall through to a 404.
 
 // Opviva domain-ownership verification (file method) — proves we own this domain for the demo.
 app.get("/.well-known/opviva-verify.txt", (_req, res) =>
