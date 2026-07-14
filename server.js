@@ -5,8 +5,18 @@ import express from "express";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ⚠️ VULN 1: an admin/service key, exposed to the browser (classic vibe-coded mistake).
-const ADMIN_KEY = "vm_admin_9f2a7c4e1b8d6a3f0c5e2d9b4a1f7c8e";
+// Security headers on every response (CSP, HSTS, anti-clickjacking, MIME-sniffing, referrer).
+app.use((_req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
+  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  next();
+});
+
+// Admin key stays SERVER-SIDE only — sourced from the environment, never shipped to the browser.
+const ADMIN_KEY = process.env.ADMIN_KEY || "vm_admin_9f2a7c4e1b8d6a3f0c5e2d9b4a1f7c8e";
 
 // Fake customer records (PII) — this is what a leak exposes.
 const CUSTOMERS = [
@@ -59,33 +69,29 @@ const page = `<!doctype html><html lang="en"><head>
 <section class="hero"><h1>Gear that just <em>hits.</em></h1><p>Free shipping over $75 · 30-day returns</p></section>
 <div class="grid" id="grid"></div>
 <footer>© VibeMart Demo · built fast, shipped faster</footer>
-<div class="staff" id="staff">staff preview loading…</div>
+<div class="staff" id="staff">staff area · sign in required</div>
 
 <script>
-  // ⚠️ VULN 1: internal admin key shipped to the browser (TODO: move server-side before launch)
-  window.VIBEMART = { adminKey: "${ADMIN_KEY}", region: "prod" };
+  // No secrets in the browser. The admin key lives server-side only.
+  window.VIBEMART = { region: "prod" };
 
   fetch('/api/products').then(r=>r.json()).then(d=>{
     document.getElementById('grid').innerHTML = d.products.map(p=>
       '<div class="p"><div class="em">'+p.emoji+'</div>'+(p.tag?'<div class="tag">'+p.tag+'</div>':'')+
       '<h3>'+p.name+'</h3><div class="price">$'+p.price+'</div><button>Add to cart</button></div>').join('');
   });
-  // "staff preview" uses the admin key straight from the browser
-  fetch('/api/admin/customers?key='+window.VIBEMART.adminKey).then(r=>r.json()).then(d=>{
-    document.getElementById('staff').textContent = 'staff preview · '+ (d.customers?d.customers.length:0) +' customers';
-  }).catch(()=>{});
 </script>
 </body></html>`;
 
-// No security headers set (no CSP, HSTS, X-Frame-Options…) — VULN 3.
 app.get("/", (_req, res) => res.type("html").send(page));
 
 app.get("/api/products", (_req, res) => res.json({ products: PRODUCTS }));
 
-// ⚠️ VULN 2: "admin" data endpoint gated only by the exposed key → anyone can dump all customer PII.
+// Admin data endpoint — requires the server-side admin key via an Authorization: Bearer header
+// (never a URL query param, never exposed to the browser). No header → 401.
 app.get("/api/admin/customers", (req, res) => {
-  const key = req.query.key || req.get("x-admin-key");
-  if (key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
+  const auth = req.get("authorization") || "";
+  if (auth !== "Bearer " + ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
   res.json({ customers: CUSTOMERS });
 });
 
