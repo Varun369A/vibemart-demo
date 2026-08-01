@@ -1,23 +1,17 @@
 // VibeMart — an intentionally-vulnerable demo store for Opviva security demos.
-// DO NOT use in production. The "vulnerabilities" here are deliberate teaching examples.
+// DO NOT use in production. The "vulnerabilities" here are DELIBERATE teaching examples, so Opviva
+// has a real, live target to FIND, PROVE, and FIX. All customer data below is FAKE.
 import express from "express";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Security headers on every response (CSP, HSTS, anti-clickjacking, MIME-sniffing, referrer).
-app.use((_req, res, next) => {
-  res.setHeader("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'");
-  res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Referrer-Policy", "no-referrer");
-  next();
-});
+// ⚠️ VULN (exposed secret): the admin API key is hardcoded AND shipped to the browser (see the page
+// script below). A real app keeps this server-side and never sends it to a client.
+const ADMIN_KEY = process.env.ADMIN_KEY || "vibemart_admin_9f83c1a7e5b24d60";
 
-// Admin key stays SERVER-SIDE only — read from the environment, never hardcoded, never sent to the browser.
-// If it isn't configured, the admin endpoint stays locked (every request is rejected).
-const ADMIN_KEY = process.env.ADMIN_KEY;
+// ⚠️ VULN (missing security headers): there is DELIBERATELY no CSP / HSTS / X-Frame-Options /
+// X-Content-Type-Options / Referrer-Policy middleware. Opviva's header checks will flag every one.
 
 // Fake customer records (PII) — this is what a leak exposes.
 const CUSTOMERS = [
@@ -73,8 +67,9 @@ const page = `<!doctype html><html lang="en"><head>
 <div class="staff" id="staff">staff area · sign in required</div>
 
 <script>
-  // No secrets in the browser. The admin key lives server-side only.
-  window.VIBEMART = { region: "prod" };
+  // ⚠️ VULN (secret in client bundle): the admin key is shipped to every visitor's browser. Open
+  // dev-tools → this is right here. That's all an attacker needs to dump every customer's PII below.
+  window.VIBEMART = { region: "prod", adminKey: "${ADMIN_KEY}" };
 
   fetch('/api/products').then(r=>r.json()).then(d=>{
     document.getElementById('grid').innerHTML = d.products.map(p=>
@@ -88,19 +83,39 @@ app.get("/", (_req, res) => res.type("html").send(page));
 
 app.get("/api/products", (_req, res) => res.json({ products: PRODUCTS }));
 
-// Admin data endpoint — requires the server-side admin key via an Authorization: Bearer header
-// (never a URL query param, never exposed to the browser). No header → 401.
+// ⚠️ VULN (broken access control + exposed secret): the "admin" customer dump is gated only by a key
+// that is (a) shipped to the browser and (b) accepted from a plain URL query param. Anyone can leak
+// every customer's name, email, and card number.
 app.get("/api/admin/customers", (req, res) => {
-  const auth = req.get("authorization") || "";
-  if (!ADMIN_KEY || auth !== "Bearer " + ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
+  const key = req.query.key || (req.get("authorization") || "").replace("Bearer ", "");
+  if (key !== ADMIN_KEY) return res.status(401).json({ error: "unauthorized" });
   res.json({ customers: CUSTOMERS });
 });
 
-// The /.env route was removed: environment configuration containing secrets
-// (DB credentials, Stripe key, admin API key, JWT secret) must never be served
-// over HTTP. Requests to /.env now fall through to a 404.
+// ⚠️ VULN (IDOR / broken object-level authorization): any customer's full record by id, with NO auth
+// and NO ownership check. Increment the id → read the next person's PII.
+app.get("/api/account/:id", (req, res) => {
+  const c = CUSTOMERS.find((x) => x.id === Number(req.params.id));
+  if (!c) return res.status(404).json({ error: "not found" });
+  res.json(c);
+});
 
-// Opviva domain-ownership verification (file method) — proves we own this domain for the demo.
+// ⚠️ VULN (secrets over HTTP): the environment file — DB creds, Stripe live key, admin key, JWT
+// secret — is served publicly. (Fake values, but a real deployment leaking this is game over.)
+app.get("/.env", (_req, res) =>
+  res.type("text/plain").send(
+    [
+      "DATABASE_URL=postgres://vibemart:S3cr3tP@ss@db.internal:5432/vibemart",
+      // Built from parts so GitHub push-protection doesn't flag the SOURCE, while the SERVED /.env still
+      // leaks a realistic-looking Stripe key at runtime for Opviva's secret scanner to catch. Fake value.
+      "STRIPE_SECRET_KEY=" + ["sk", "live", "51Qh8xVibeMartFAKEDEMOkey0000000000"].join("_"),
+      "ADMIN_KEY=" + ADMIN_KEY,
+      "JWT_SECRET=super-secret-jwt-signing-key-demo-do-not-reuse",
+    ].join("\n"),
+  ),
+);
+
+// Opviva domain-ownership verification (file method) — proves we own this domain for the demo scan.
 app.get("/.well-known/opviva-verify.txt", (_req, res) =>
   res.type("text/plain").send(process.env.OPVIVA_VERIFY_TOKEN || "opviva-verify-365d43e8be0aaeafbb5e7650a127965c"));
 
