@@ -2,6 +2,9 @@
 // DO NOT use in production. The "vulnerabilities" here are DELIBERATE teaching examples, so Opviva
 // has a real, live target to FIND, PROVE, and FIX. All customer data below is FAKE.
 import express from "express";
+// Opviva error monitoring ("own Sentry") — reports uncaught errors to Opviva. Loaded first so its
+// process-level hooks are installed before anything else can throw.
+import opviva from "./opviva-monitor.cjs";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -120,5 +123,20 @@ app.get("/.well-known/opviva-verify.txt", (_req, res) =>
   res.type("text/plain").send(process.env.OPVIVA_VERIFY_TOKEN || "opviva-verify-365d43e8be0aaeafbb5e7650a127965c"));
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
+
+// A realistic runtime crash (the kind Opviva's monitoring should catch): reading a property off an
+// undefined object during "checkout". It's routed through Express's error pipeline below.
+app.get("/api/checkout", (_req, _res) => {
+  const cart = undefined;
+  // TypeError: Cannot read properties of undefined (reading 'total')
+  return { ok: true, total: cart.total };
+});
+
+// Express error handler — report the crash to Opviva (own Sentry), then answer 500. The app stays up;
+// the error still lands in Opviva grouped + release-tagged.
+app.use((err, _req, res, _next) => {
+  opviva.report(err && err.name, err && err.message, err && err.stack);
+  res.status(500).json({ error: "internal error" });
+});
 
 app.listen(PORT, () => console.log(`VibeMart demo on :${PORT}`));
